@@ -749,7 +749,10 @@ details.help > p {
   line-height: 1.2;
   text-align: left;
 }
-.tlx-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.tlx-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1px 5px; min-width: 0; }
+.tlx-label { max-width: 100%; }
+/* o nome não quebra (as siglas descem de linha); se ainda faltar espaço, encurta com "…" */
+.tlx-row .tlx-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: calc(100% - 28px); }
 /* Sigla do prazo (Q, PAA, D, EM): depois do nome, pequena e sobrescrita */
 .tlx-code {
   flex: none;
@@ -766,7 +769,7 @@ details.help > p {
   cursor: help;
 }
 .tlx-code + .tlx-code { margin-left: -2px; }
-.tlx-label.late .tlx-code { background: var(--late-solid); border-color: var(--late-solid); color: #fff; }
+.tlx-code.late { background: var(--late-solid); border-color: var(--late-solid); color: #fff; }
 .avatar.xs { width: 22px; height: 22px; border: 1.5px solid var(--surface); }
 .tlx-name {
   padding: 0 2px;

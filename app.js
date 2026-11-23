@@ -12,6 +12,7 @@
     dsTotal: 48,        // doutorado: 4 anos
     dsQual: 24,         // qualificação do doutorado: 2 anos
     firstDraft: 3,      // 1ª versão do texto: 3 meses antes (seleção da banca)
+    boardDraft: 2,      // banca marcada: 2 meses antes (após aprovação do texto pelo orientador)
     finalDraft: 1,      // versão final: 1 mês antes (agendamento pela secretaria)
     defenseDrafts: true,// aplicar as mesmas entregas para a defesa
     alertWindow: 60,    // dias de antecedência para avisos
@@ -140,21 +141,21 @@
     return new Date(d.getFullYear(), d.getMonth() + 1, 0);
   }
 
-  // Prazo que vence "N meses após a entrada": fim do mês anterior ao aniversário.
-  // Ex.: entrada 01/12/2022 + 48 meses → 30/11/2026 (como a "previsão de defesa" do PPG).
+  // Prazo que vence "N meses após a entrada": último dia do mês do aniversário.
+  // Ex.: entrada fev/2025 + 24 meses → qualificação até 28/02/2027.
   function deadlineAfter(entry, months) {
-    return endOfMonth(addDays(addMonths(entry, months), -1));
+    return endOfMonth(addMonths(new Date(entry.getFullYear(), entry.getMonth(), 1), months));
   }
 
   // Prazo "N meses antes" de outro prazo: fim do mês correspondente.
-  // Ex.: defesa 30/11/2026, 3 meses antes → 31/08/2026.
+  // Ex.: qualificação 28/02/2027 → banca (2 meses antes) 31/12/2026, 1ª versão (3 meses) 30/11/2026.
   function monthEndBefore(deadline, months) {
     return endOfMonth(new Date(deadline.getFullYear(), deadline.getMonth() - months, 1));
   }
 
-  // Banca: marcada no mesmo mês da entrega da 1ª versão (até o fim desse mês).
+  // Banca: marcada até N meses antes do prazo (fim do mês), depois da aprovação do texto.
   function boardDate(deadline, rules) {
-    return monthEndBefore(deadline, rules.firstDraft);
+    return monthEndBefore(deadline, rules.boardDraft ?? 2);
   }
 
   function daysBetween(a, b) {
@@ -307,7 +308,8 @@
           const lack = [];
           if (!pubs.first[i]) lack.push('1º autor');
           if (!pubs.co[i]) lack.push('coautoria');
-          if (lack.length) missing.push({ year: i + 1, start: addMonths(entry, 12 * i), end: yEnd, lack });
+          const yStart = i === 0 ? entry : addDays(deadlineAfter(entry, 12 * i), 1);
+          if (lack.length) missing.push({ year: i + 1, start: yStart, end: yEnd, lack });
         }
         if (missing.length) {
           const years = missing.map(m => m.year);
@@ -622,13 +624,15 @@
     const posDate = d => Math.min(100, Math.max(0, (daysBetween(a.entry, d) / a.totalDays) * 100));
     const markers = [];
     if (s.notQualified && !s.done && !usesPAA(s)) {
-      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.qual, state.rules.firstDraft))}%" title="1ª versão e banca (qualificação)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.qual, state.rules.firstDraft))}%" title="1ª versão (qualificação)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(boardDate(a.qual, state.rules))}%" title="Banca marcada (qualificação)"></span>`);
       markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.qual, state.rules.finalDraft))}%" title="Versão final (qualificação)"></span>`);
     }
     const q = qualTerms(s);
     markers.push(`<span class="marker" style="left:${posDate(a.qual)}%" data-label="${q.short}" title="${q.name}: ${fmtDate(a.qual)}"></span>`);
     if (state.rules.defenseDrafts && !s.done) {
-      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.end, state.rules.firstDraft))}%" title="1ª versão e banca (defesa)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.end, state.rules.firstDraft))}%" title="1ª versão (defesa)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(boardDate(a.end, state.rules))}%" title="Banca marcada (defesa)"></span>`);
       markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.end, state.rules.finalDraft))}%" title="Versão final (defesa)"></span>`);
     }
     return markers.join('');
@@ -741,7 +745,7 @@
       add(`O texto deve ser entregue <strong>antes</strong> da ${a.events.some(e => e.stage === 'qual' && e.kind === 'first') ? 'qualificação ou da defesa' : 'defesa'}: a 1ª versão ${m(state.rules.firstDraft)} antes e a versão final ${m(state.rules.finalDraft)} antes (para a secretaria agendar).`);
     }
     if (a.events.some(e => e.kind === 'board')) {
-      add(`<strong>Marcação da banca:</strong> só depois que o <strong>orientador aprovar o texto</strong>. Convide os membros, combine a data e marque a banca até o fim do mesmo mês da entrega da 1ª versão. É uma etapa trabalhosa: comece cedo.`);
+      add(`<strong>Marcação da banca:</strong> só depois que o <strong>orientador aprovar o texto</strong>. Convide os membros, combine a data e marque a banca até ${m(state.rules.boardDraft ?? 2)} antes da ${a.events.some(e => e.stage === 'qual' && e.kind === 'board') ? 'qualificação ou da defesa' : 'defesa'} (fim do mês). É uma etapa trabalhosa: comece cedo.`);
     }
     if (usesPAA(s) && s.notQualified) {
       add('No mestrado em Ciência da Computação, o marco equivalente à qualificação é a <strong>aprovação na disciplina PAA</strong> (Projeto e Análise de Algoritmos).');
@@ -925,22 +929,20 @@
     // Linhas: uma por aluno em cada mês, com as siglas das etapas daquele mês lado a lado
     // (ex.: entregar manuscrito e marcar banca, que costumam ficar a ~2 semanas um do outro).
     // Atrasados entram em "este mês" com todas as etapas vencidas.
+    // Uma linha por aluno em cada mês (nunca o mesmo aluno duas vezes no mesmo mês).
+    // Em "este mês", as etapas vencidas (siglas vermelhas) e as que vencem no mês (siglas
+    // normais) ficam juntas na mesma linha.
     const rows = [];
     const monthKey = d => `${d.getFullYear()}-${d.getMonth()}`;
-    const uniqCodes = (s, evs) => {
+    const nowKey = monthKey(now);
+    const uniqCodes = (s, evs, late) => {
       const seen = new Map();
-      evs.forEach(ev => { const c = eventCode(s, ev); if (!seen.has(c.code)) seen.set(c.code, c); });
+      evs.forEach(ev => { const c = eventCode(s, ev); if (!seen.has(c.code)) seen.set(c.code, { ...c, late }); });
       return [...seen.values()];
     };
     for (const { s, a } of analyzed) {
       if (s.done) continue;
       const overdue = a.events.filter(e => e.status === 'late').sort((x, y) => x.date - y.date);
-      if (overdue.length) {
-        rows.push({ s, cat: 'late', date: now, codes: uniqCodes(s, overdue),
-          what: overdue.map(ev => `${eventChipLabel(s, ev)} (${monthYear(ev.date)})`).join(' + ') + ' · vencido',
-          tip: `${s.name}: ${overdue.map(ev => `${ev.label} venceu em ${monthYear(ev.date)}`).join('; ')}`,
-          sort: overdue[0].date });
-      }
       const byMonth = new Map();
       for (const ev of a.events) {
         if (ev.completed || ev.days < 0 || ev.date >= end) continue;
@@ -948,13 +950,28 @@
         if (!byMonth.has(k)) byMonth.set(k, []);
         byMonth.get(k).push(ev);
       }
+      const upcomingText = evs => {
+        const sched = evs.some(ev => ev.status === 'scheduled');
+        return `${evs.map(ev => eventChipLabel(s, ev)).join(' + ')}${sched ? ' 📅' : ''} · ${monthYear(evs[0].date)}`;
+      };
+      const upcomingTip = evs => `${evs.map(ev => `${ev.label}${ev.status === 'scheduled' ? ' (banca marcada)' : ''}`).join('; ')} — ${monthYear(evs[0].date)}`;
+
+      if (overdue.length) {
+        const thisMonth = (byMonth.get(nowKey) || []).sort((x, y) => x.date - y.date);
+        byMonth.delete(nowKey); // entra na mesma linha dos atrasados
+        const lateText = overdue.map(ev => `${eventChipLabel(s, ev)} (${monthYear(ev.date)})`).join(' + ') + ' · vencido';
+        rows.push({ s, cat: 'late', date: now,
+          codes: [...uniqCodes(s, overdue, true), ...uniqCodes(s, thisMonth, false)],
+          what: thisMonth.length ? `${lateText} | ${upcomingText(thisMonth)}` : lateText,
+          tip: `${s.name}: ${overdue.map(ev => `${ev.label} venceu em ${monthYear(ev.date)}`).join('; ')}${thisMonth.length ? `; ${upcomingTip(thisMonth)}` : ''}`,
+          sort: overdue[0].date });
+      }
       byMonth.forEach(evs => {
         evs.sort((x, y) => x.date - y.date);
-        const sched = evs.some(ev => ev.status === 'scheduled');
         rows.push({ s, cat: evs.some(ev => ev.kind === 'deadline') ? 'milestone' : 'text', date: evs[0].date,
-          codes: uniqCodes(s, evs),
-          what: `${evs.map(ev => eventChipLabel(s, ev)).join(' + ')}${sched ? ' 📅' : ''} · ${monthYear(evs[0].date)}`,
-          tip: `${s.name}: ${evs.map(ev => `${ev.label}${ev.status === 'scheduled' ? ' (banca marcada)' : ''}`).join('; ')} — ${monthYear(evs[0].date)}`,
+          codes: uniqCodes(s, evs, false),
+          what: upcomingText(evs),
+          tip: `${s.name}: ${upcomingTip(evs)}`,
           sort: evs[0].date });
       });
     }
@@ -990,15 +1007,18 @@
         ${g.people.map(p => `
           <span class="tlx-row">
             ${avatarHtml(p.s, 'xs')}
-            <button type="button" class="tlx-name" data-student="${esc(p.s.id)}" aria-label="${esc(p.tip)}">${g.cat === 'late' ? '⚠ ' : ''}${esc(shortName(p.s.name))}</button>
-            ${p.codes.map(c => `<abbr class="tlx-code" title="${esc(c.name)}">${c.code}</abbr>`).join('')}
+            <button type="button" class="tlx-name" data-student="${esc(p.s.id)}" aria-label="${esc(p.tip)}" title="${esc(p.s.name)}">${g.cat === 'late' ? '⚠ ' : ''}${esc(shortName(p.s.name))}</button>
+            ${p.codes.map(c => `<abbr class="tlx-code${c.late ? ' late' : ''}" title="${esc(c.name)}${c.late ? ' — vencido' : ''}">${c.code}</abbr>`).join('')}
           </span>`).join('')}
         <span class="tlx-what">${esc(g.what)}</span>
       </div>`).join('');
     const labels = [...host.querySelectorAll('.tlx-label')];
-    // Cada rótulo cabe na largura do seu mês (o texto quebra linha se preciso).
-    const monthW = (W - 2 * PAD) / TIMELINE_MONTHS;
-    labels.forEach(el => { el.style.maxWidth = `${Math.floor(monthW - 8)}px`; });
+    // Cada rótulo cabe na largura do SEU mês (os meses têm larguras diferentes: fevereiro é menor).
+    all.forEach((g, i) => {
+      const m0 = new Date(g.date.getFullYear(), g.date.getMonth(), 1);
+      const width = xOf(addMonths(m0, 1)) - xOf(m0) - LABEL_INSET - 4;
+      labels[i].style.maxWidth = `${Math.floor(width)}px`;
+    });
 
     // 2) Cada mês empilha seus rótulos de forma independente, do eixo para cima, bem juntos
     //    (os rótulos nunca passam da largura do mês, então meses vizinhos não se sobrepõem).
@@ -1120,6 +1140,7 @@
     $('#r-ds-qual').value = r.dsQual;
     $('#r-first').value = r.firstDraft;
     $('#r-final').value = r.finalDraft;
+    $('#r-board').value = r.boardDraft ?? 2;
     $('#r-defense-drafts').checked = !!r.defenseDrafts;
     $('#r-window').value = r.alertWindow;
   }
@@ -1235,7 +1256,7 @@
   function pubStatus(s, a) {
     const pubs = pubFlags(s);
     return Array.from({ length: pubYears() }, (_, i) => {
-      const start = addMonths(a.entry, 12 * i);
+      const start = i === 0 ? a.entry : addDays(deadlineAfter(a.entry, 12 * i), 1);
       const end = deadlineAfter(a.entry, 12 * (i + 1));
       const first = !!pubs.first[i];
       const co = !!pubs.co[i];
@@ -1525,6 +1546,7 @@
       dsQual: num('#r-ds-qual', 1),
       firstDraft: num('#r-first', 0),
       finalDraft: num('#r-final', 0),
+      boardDraft: num('#r-board', 0),
       defenseDrafts: $('#r-defense-drafts').checked,
       alertWindow: num('#r-window', 1),
     };
@@ -1532,8 +1554,8 @@
       toast('A qualificação não pode ser depois do prazo final.');
       return;
     }
-    if (r.firstDraft < r.finalDraft) {
-      toast('A 1ª versão deve vir antes da versão final (mais meses antes).');
+    if (!(r.firstDraft >= r.boardDraft && r.boardDraft >= r.finalDraft)) {
+      toast('Ordem esperada (meses antes): 1ª versão ≥ banca marcada ≥ versão final.');
       return;
     }
     state.rules = r;
