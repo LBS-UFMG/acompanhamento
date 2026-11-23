@@ -12,10 +12,11 @@
     dsTotal: 48,        // doutorado: 4 anos
     dsQual: 24,         // qualificação do doutorado: 2 anos
     firstDraft: 3,      // 1ª versão do texto: 3 meses antes (seleção da banca)
-    boardDraft: 2,      // banca marcada: 2 meses antes (após aprovação do texto pelo orientador)
+    boardDraft: 3,      // banca marcada: 3 meses antes, junto com a 1ª versão (após aprovação do orientador)
     finalDraft: 1,      // versão final: 1 mês antes (agendamento pela secretaria)
     defenseDrafts: true,// aplicar as mesmas entregas para a defesa
     alertWindow: 60,    // dias de antecedência para avisos
+    boardRuleV3: true,  // marca: regras já no padrão "banca 3 meses antes"
   };
 
   const LEVEL_LABEL = { mestrado: 'Mestrado', doutorado: 'Doutorado' };
@@ -71,6 +72,9 @@
         const data = JSON.parse(raw);
         const saved = Array.isArray(data.students) ? data.students : [];
         const rules = { ...DEFAULT_RULES, ...(data.rules || {}) };
+        // Regras salvas antes da mudança "banca 3 meses antes" (era 2): adota o novo padrão.
+        if (!data.rules?.boardRuleV3) rules.boardDraft = DEFAULT_RULES.boardDraft;
+        rules.boardRuleV3 = true;
         // Navegador que só tinha os antigos alunos teste: troca pelos alunos do LBS.
         // (Nunca descarta alunos cadastrados pelo usuário.)
         if (saved.every(s => String(s.id).startsWith('teste-'))) {
@@ -1568,7 +1572,7 @@
       toast('Ordem esperada (meses antes): 1ª versão ≥ banca marcada ≥ versão final.');
       return;
     }
-    state.rules = r;
+    state.rules = { ...r, boardRuleV3: true };
     save();
     render();
     toast('Regras salvas.');
