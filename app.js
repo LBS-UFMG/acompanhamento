@@ -141,10 +141,15 @@
     return new Date(d.getFullYear(), d.getMonth() + 1, 0);
   }
 
-  // Prazo que vence "N meses após a entrada": último dia do mês do aniversário.
-  // Ex.: entrada fev/2025 + 24 meses → qualificação até 28/02/2027.
+  // Último dia do mês "entrada + N meses". Ex.: entrada fev/2025 + 24 → 28/02/2027.
   function deadlineAfter(entry, months) {
     return endOfMonth(addMonths(new Date(entry.getFullYear(), entry.getMonth(), 1), months));
+  }
+
+  // Fim do período de N meses completos contando o mês de entrada.
+  // Ex.: entrada dez/2022, 48 meses → defesa até 30/11/2026 (como a previsão do PPG).
+  function periodEnd(entry, months) {
+    return deadlineAfter(entry, months - 1);
   }
 
   // Prazo "N meses antes" de outro prazo: fim do mês correspondente.
@@ -213,7 +218,7 @@
     const isMs = student.level === 'mestrado';
     const totalM = Number(isMs ? rules.msTotal : rules.dsTotal);
     const qualM = Number(isMs ? rules.msQual : rules.dsQual);
-    const end = deadlineAfter(entry, totalM);
+    const end = periodEnd(entry, totalM); // defesa: fim do último mês do curso
     const qual = deadlineAfter(entry, qualM);
 
     const elapsed = daysBetween(entry, now);
@@ -306,12 +311,12 @@
         const missing = [];
         const pubs = pubFlags(student);
         for (let i = 0; i < pubYears(rules); i++) {
-          const yEnd = deadlineAfter(entry, 12 * (i + 1));
+          const yEnd = periodEnd(entry, 12 * (i + 1));
           if (now < yEnd) continue;
           const lack = [];
           if (!pubs.first[i]) lack.push('1º autor');
           if (!pubs.co[i]) lack.push('coautoria');
-          const yStart = i === 0 ? entry : addDays(deadlineAfter(entry, 12 * i), 1);
+          const yStart = i === 0 ? entry : addDays(periodEnd(entry, 12 * i), 1);
           if (lack.length) missing.push({ year: i + 1, start: yStart, end: yEnd, lack });
         }
         if (missing.length) {
@@ -755,7 +760,7 @@
     }
 
     // Congresso: mestrado, ou doutorado no primeiro ano (pôster aceito)
-    const firstYear = !isMs && a.now <= deadlineAfter(a.entry, 12);
+    const firstYear = !isMs && a.now <= periodEnd(a.entry, 12);
     if (isMs || firstYear) {
       const missing = isMs && !s.congress;
       const pending = missing && !s.notQualified; // amarelo só depois da qualificação/PAA, como no cartão
@@ -1261,8 +1266,8 @@
   function pubStatus(s, a) {
     const pubs = pubFlags(s);
     return Array.from({ length: pubYears() }, (_, i) => {
-      const start = i === 0 ? a.entry : addDays(deadlineAfter(a.entry, 12 * i), 1);
-      const end = deadlineAfter(a.entry, 12 * (i + 1));
+      const start = i === 0 ? a.entry : addDays(periodEnd(a.entry, 12 * i), 1);
+      const end = periodEnd(a.entry, 12 * (i + 1));
       const first = !!pubs.first[i];
       const co = !!pubs.co[i];
       let status = 'future';
