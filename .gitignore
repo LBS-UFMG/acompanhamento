@@ -1,0 +1,20 @@
+# Gerado pelo publicar.py (versão para o claude.ai)
+dist/
+
+# Dados dos alunos em texto legível: ficam só na sua máquina.
+# No repositório vai apenas dados-lbs.enc.js (cifrado). Veja ferramentas/criptografar-dados.mjs.
+dados-lbs.fonte.js
+dados-lbs.js
+
+# Arquivos de implantação (deploy feito manualmente no servidor)
+DEPLOY.md
+Dockerfile
+.dockerignore
+docker-compose.yml
+deploy/
+
+# Configurações locais do editor/assistente
+.claude/
+
+# Sistema
+.DS_Store
