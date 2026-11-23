@@ -223,7 +223,10 @@
     const events = [];
     // Checkboxes do aluno: textos entregues e qualificação/defesa agendada.
     const paa = usesPAA(student);
-    const flag = (stage, what) => !(paa && stage === 'qual') && !!student[`${stage}${what}`];
+    // Mestrado não marca banca de qualificação (só a de defesa); PAA não tem texto nem banca.
+    const flag = (stage, what) => !(paa && stage === 'qual')
+      && !(isMs && stage === 'qual' && what === 'Scheduled')
+      && !!student[`${stage}${what}`];
     // Fluxo: 1ª versão → orientador aprova → banca marcada → versão final → qualificação/defesa.
     const pushStage = (stage, deadline, withDrafts, withBoard) => {
       if (withDrafts) {
@@ -262,7 +265,7 @@
 
     if (!student.done) {
       // PAA é uma disciplina: sem entrega de texto nem agendamento.
-      if (student.notQualified) pushStage('qual', qual, !paa, !paa); // PAA: sem texto nem banca
+      if (student.notQualified) pushStage('qual', qual, !paa, !paa && !isMs); // banca de quali só no doutorado
       pushStage('def', end, !!rules.defenseDrafts, true);
     }
 
@@ -625,7 +628,7 @@
     const markers = [];
     if (s.notQualified && !s.done && !usesPAA(s)) {
       markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.qual, state.rules.firstDraft))}%" title="1ª versão (qualificação)"></span>`);
-      markers.push(`<span class="marker draft" style="left:${posDate(boardDate(a.qual, state.rules))}%" title="Banca marcada (qualificação)"></span>`);
+      if (s.level !== 'mestrado') markers.push(`<span class="marker draft" style="left:${posDate(boardDate(a.qual, state.rules))}%" title="Banca marcada (qualificação)"></span>`);
       markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.qual, state.rules.finalDraft))}%" title="Versão final (qualificação)"></span>`);
     }
     const q = qualTerms(s);
@@ -1237,6 +1240,8 @@
   // Esconde a etapa de qualificação se o aluno já qualificou e a de defesa se já defendeu.
   function toggleStageFields() {
     const paa = usesPAA({ level: $('#f-level').value, program: currentProgramValue() });
+    // Banca de qualificação: só no doutorado.
+    $('#f-qualScheduled').closest('label').hidden = $('#f-level').value === 'mestrado';
     $('#f-notqualified-label').textContent = paa ? 'Ainda não foi aprovado em PAA' : 'Ainda não qualificou';
     $('#f-stage-qual').hidden = paa || !$('#f-notqualified').checked;
     $('#f-stage-def').hidden = $('#f-done').checked;
