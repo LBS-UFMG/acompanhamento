@@ -12,7 +12,6 @@
     dsTotal: 48,        // doutorado: 4 anos
     dsQual: 24,         // qualificação do doutorado: 2 anos
     firstDraft: 3,      // 1ª versão do texto: 3 meses antes (seleção da banca)
-    boardWeeks: 2,      // banca marcada: ~2 semanas depois da 1ª versão (após aprovação do orientador)
     finalDraft: 1,      // versão final: 1 mês antes (agendamento pela secretaria)
     defenseDrafts: true,// aplicar as mesmas entregas para a defesa
     alertWindow: 60,    // dias de antecedência para avisos
@@ -136,9 +135,26 @@
     return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
   }
 
-  // Prazo para marcar a banca: 1ª versão + N semanas.
+  // Prazos finais são sempre no ÚLTIMO DIA DO MÊS (a entrada pode ser em qualquer dia).
+  function endOfMonth(d) {
+    return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  }
+
+  // Prazo que vence "N meses após a entrada": fim do mês anterior ao aniversário.
+  // Ex.: entrada 01/12/2022 + 48 meses → 30/11/2026 (como a "previsão de defesa" do PPG).
+  function deadlineAfter(entry, months) {
+    return endOfMonth(addDays(addMonths(entry, months), -1));
+  }
+
+  // Prazo "N meses antes" de outro prazo: fim do mês correspondente.
+  // Ex.: defesa 30/11/2026, 3 meses antes → 31/08/2026.
+  function monthEndBefore(deadline, months) {
+    return endOfMonth(new Date(deadline.getFullYear(), deadline.getMonth() - months, 1));
+  }
+
+  // Banca: marcada no mesmo mês da entrega da 1ª versão (até o fim desse mês).
   function boardDate(deadline, rules) {
-    return addDays(addMonths(deadline, -rules.firstDraft), 7 * (rules.boardWeeks ?? 2));
+    return monthEndBefore(deadline, rules.firstDraft);
   }
 
   function daysBetween(a, b) {
@@ -196,8 +212,8 @@
     const isMs = student.level === 'mestrado';
     const totalM = Number(isMs ? rules.msTotal : rules.dsTotal);
     const qualM = Number(isMs ? rules.msQual : rules.dsQual);
-    const end = addMonths(entry, totalM);
-    const qual = addMonths(entry, qualM);
+    const end = deadlineAfter(entry, totalM);
+    const qual = deadlineAfter(entry, qualM);
 
     const elapsed = daysBetween(entry, now);
     const totalDays = daysBetween(entry, end);
@@ -211,7 +227,7 @@
     const pushStage = (stage, deadline, withDrafts, withBoard) => {
       if (withDrafts) {
         events.push({
-          stage, kind: 'first', date: addMonths(deadline, -rules.firstDraft),
+          stage, kind: 'first', date: monthEndBefore(deadline, rules.firstDraft),
           completed: flag(stage, 'First'),
           label: `Entrega da 1ª versão do texto (${STAGE_LABEL[stage]}) — seleção da banca`,
           short: `1ª versão (${STAGE_LABEL[stage]})`,
@@ -227,7 +243,7 @@
       }
       if (withDrafts) {
         events.push({
-          stage, kind: 'final', date: addMonths(deadline, -rules.finalDraft),
+          stage, kind: 'final', date: monthEndBefore(deadline, rules.finalDraft),
           completed: flag(stage, 'Final'),
           label: `Entrega da versão final (${STAGE_LABEL[stage]}) — agendamento pela secretaria`,
           short: `Versão final (${STAGE_LABEL[stage]})`,
@@ -286,7 +302,7 @@
         const missing = [];
         const pubs = pubFlags(student);
         for (let i = 0; i < pubYears(rules); i++) {
-          const yEnd = addMonths(entry, 12 * (i + 1));
+          const yEnd = deadlineAfter(entry, 12 * (i + 1));
           if (now < yEnd) continue;
           const lack = [];
           if (!pubs.first[i]) lack.push('1º autor');
@@ -603,20 +619,17 @@
   }
 
   function progressMarkers(s, a) {
-    const pos = months => Math.min(100, (daysBetween(a.entry, addMonths(a.entry, months)) / a.totalDays) * 100);
     const posDate = d => Math.min(100, Math.max(0, (daysBetween(a.entry, d) / a.totalDays) * 100));
     const markers = [];
     if (s.notQualified && !s.done && !usesPAA(s)) {
-      markers.push(`<span class="marker draft" style="left:${pos(a.qualM - state.rules.firstDraft)}%" title="1ª versão (qualificação)"></span>`);
-      markers.push(`<span class="marker draft" style="left:${posDate(boardDate(a.qual, state.rules))}%" title="Banca marcada (qualificação)"></span>`);
-      markers.push(`<span class="marker draft" style="left:${pos(a.qualM - state.rules.finalDraft)}%" title="Versão final (qualificação)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.qual, state.rules.firstDraft))}%" title="1ª versão e banca (qualificação)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.qual, state.rules.finalDraft))}%" title="Versão final (qualificação)"></span>`);
     }
     const q = qualTerms(s);
-    markers.push(`<span class="marker" style="left:${pos(a.qualM)}%" data-label="${q.short}" title="${q.name}: ${fmtDate(a.qual)}"></span>`);
+    markers.push(`<span class="marker" style="left:${posDate(a.qual)}%" data-label="${q.short}" title="${q.name}: ${fmtDate(a.qual)}"></span>`);
     if (state.rules.defenseDrafts && !s.done) {
-      markers.push(`<span class="marker draft" style="left:${pos(a.totalM - state.rules.firstDraft)}%" title="1ª versão (defesa)"></span>`);
-      markers.push(`<span class="marker draft" style="left:${posDate(boardDate(a.end, state.rules))}%" title="Banca marcada (defesa)"></span>`);
-      markers.push(`<span class="marker draft" style="left:${pos(a.totalM - state.rules.finalDraft)}%" title="Versão final (defesa)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.end, state.rules.firstDraft))}%" title="1ª versão e banca (defesa)"></span>`);
+      markers.push(`<span class="marker draft" style="left:${posDate(monthEndBefore(a.end, state.rules.finalDraft))}%" title="Versão final (defesa)"></span>`);
     }
     return markers.join('');
   }
@@ -728,14 +741,14 @@
       add(`O texto deve ser entregue <strong>antes</strong> da ${a.events.some(e => e.stage === 'qual' && e.kind === 'first') ? 'qualificação ou da defesa' : 'defesa'}: a 1ª versão ${m(state.rules.firstDraft)} antes e a versão final ${m(state.rules.finalDraft)} antes (para a secretaria agendar).`);
     }
     if (a.events.some(e => e.kind === 'board')) {
-      add(`<strong>Marcação da banca:</strong> só depois que o <strong>orientador aprovar o texto</strong>. Convide os membros, combine a data e marque a banca em até ${state.rules.boardWeeks ?? 2} semanas depois da entrega da 1ª versão. É uma etapa trabalhosa: comece cedo.`);
+      add(`<strong>Marcação da banca:</strong> só depois que o <strong>orientador aprovar o texto</strong>. Convide os membros, combine a data e marque a banca até o fim do mesmo mês da entrega da 1ª versão. É uma etapa trabalhosa: comece cedo.`);
     }
     if (usesPAA(s) && s.notQualified) {
       add('No mestrado em Ciência da Computação, o marco equivalente à qualificação é a <strong>aprovação na disciplina PAA</strong> (Projeto e Análise de Algoritmos).');
     }
 
     // Congresso: mestrado, ou doutorado no primeiro ano (pôster aceito)
-    const firstYear = !isMs && a.now < addMonths(a.entry, 12);
+    const firstYear = !isMs && a.now <= deadlineAfter(a.entry, 12);
     if (isMs || firstYear) {
       const missing = isMs && !s.congress;
       const pending = missing && !s.notQualified; // amarelo só depois da qualificação/PAA, como no cartão
@@ -1107,7 +1120,6 @@
     $('#r-ds-qual').value = r.dsQual;
     $('#r-first').value = r.firstDraft;
     $('#r-final').value = r.finalDraft;
-    $('#r-board').value = r.boardWeeks ?? 2;
     $('#r-defense-drafts').checked = !!r.defenseDrafts;
     $('#r-window').value = r.alertWindow;
   }
@@ -1224,7 +1236,7 @@
     const pubs = pubFlags(s);
     return Array.from({ length: pubYears() }, (_, i) => {
       const start = addMonths(a.entry, 12 * i);
-      const end = addMonths(a.entry, 12 * (i + 1));
+      const end = deadlineAfter(a.entry, 12 * (i + 1));
       const first = !!pubs.first[i];
       const co = !!pubs.co[i];
       let status = 'future';
@@ -1513,7 +1525,6 @@
       dsQual: num('#r-ds-qual', 1),
       firstDraft: num('#r-first', 0),
       finalDraft: num('#r-final', 0),
-      boardWeeks: num('#r-board', 0),
       defenseDrafts: $('#r-defense-drafts').checked,
       alertWindow: num('#r-window', 1),
     };
