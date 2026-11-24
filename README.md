@@ -26,6 +26,18 @@ e acesse http://localhost:8765.
 
 ## Dados
 
-O site pede uma senha. Os dados iniciais (usados só no primeiro acesso) ficam **cifrados** em `dados-lbs.enc.js`, gerado a partir de `dados-lbs.fonte.js` (legível, só na máquina de quem mantém o site) com `node ferramentas/criptografar-dados.mjs` (pede a senha; use a mesma do site). São os alunos de mestrado e doutorado do LBS, coletados da [página da equipe](https://bioinfo.dcc.ufmg.br/pt/team) e das [listas de alunos do PPG Bioinformática](https://www.pgbioinfo.icb.ufmg.br/alunos.php?ano=2025&nivel=M). Alunos sem data no PPG ficaram com entrada em 23/11/2026 e uma observação pedindo correção.
+Em produção, o site roda com o servidor em `servidor/server.mjs` (Node, sem dependências): ele
+serve as páginas e **grava os dados de forma permanente** num arquivo JSON no servidor, com uma
+cópia de segurança por dia. Todos veem as mesmas informações; o site busca alterações de outras
+pessoas a cada minuto. A senha é conferida pelo servidor (variável `SENHA`).
 
-Depois do primeiro acesso, os dados ficam no `localStorage` do navegador. Use **Exportar JSON** para backup ou para levar os dados para outro computador, e **Importar JSON** para restaurar.
+```bash
+SENHA=... DATA_DIR=./dados node servidor/server.mjs   # http://localhost:8080
+```
+
+Na primeira execução, o servidor cria a base decifrando `dados-lbs.enc.js` (os alunos do LBS,
+cifrados com a senha). Esse arquivo é gerado a partir de `dados-lbs.fonte.js` — legível, só na
+máquina de quem mantém o site — com `node ferramentas/criptografar-dados.mjs`.
+
+Sem o servidor (abrindo os arquivos direto, ou na versão publicada no claude.ai), o site funciona
+em **modo local**: os dados ficam só no navegador.

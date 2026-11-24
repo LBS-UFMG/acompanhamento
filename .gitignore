@@ -12,6 +12,7 @@ Dockerfile
 .dockerignore
 docker-compose.yml
 deploy/
+.env
 
 # Configurações locais do editor/assistente
 .claude/

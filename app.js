@@ -106,6 +106,75 @@
     }
   }
 
+  // ---------------------------------------------------------------- servidor (dados permanentes)
+  // Em produção o site roda com servidor/server.mjs: os dados ficam no servidor e todos veem as
+  // mesmas informações. Sem servidor (página no claude.ai, arquivo aberto localmente), o site
+  // funciona no "modo local", com os dados no navegador.
+  let SERVER = false;
+  let TOKEN = null;
+  let serverVersion = 0;
+  const SESSION_KEY = 'lbs-acompanhamento-sessao';
+  const MIGRATED_KEY = 'lbs-acompanhamento-enviado-ao-servidor';
+
+  async function detectServer() {
+    try {
+      const res = await fetch('api/status', { cache: 'no-store' });
+      if (!res.ok) return false;
+      return (await res.json()).app === 'acompanhamento-lbs';
+    } catch {
+      return false;
+    }
+  }
+
+  async function api(method, url, body) {
+    const res = await fetch(url, {
+      method,
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && url !== 'api/login') sessionExpired();
+    if (!res.ok) throw Object.assign(new Error(data.error || `Erro ${res.status}`), { status: res.status });
+    return data;
+  }
+
+  function applyServerData(data) {
+    serverVersion = data.version;
+    state = { students: data.students || [], rules: { ...DEFAULT_RULES, ...(data.rules || {}) } };
+  }
+
+  // Grava uma alteração. op: { student } | { remove: id } | { rules } | { all: { students, rules } }
+  async function persist(op) {
+    if (!SERVER) return save();
+    try {
+      let r;
+      if (op.student) r = await api('PUT', `api/alunos/${encodeURIComponent(op.student.id)}`, op.student);
+      else if (op.remove) r = await api('DELETE', `api/alunos/${encodeURIComponent(op.remove)}`);
+      else if (op.rules) r = await api('PUT', 'api/regras', op.rules);
+      else if (op.all) r = await api('PUT', 'api/dados', op.all);
+      serverVersion = r.version;
+      return true;
+    } catch (err) {
+      if (err.status !== 401) toast(`Não foi possível salvar no servidor: ${err.message}`);
+      await refreshFromServer(true); // volta para o que está gravado no servidor
+      return false;
+    }
+  }
+
+  // Traz as alterações feitas por outras pessoas.
+  async function refreshFromServer(force = false) {
+    if (!SERVER || !TOKEN) return;
+    try {
+      const data = await api('GET', 'api/dados');
+      if (!force && data.version === serverVersion) return;
+      applyServerData(data);
+      if ($('#rules-card').hidden) fillRulesForm(); // não apaga regras sendo editadas
+      render();
+    } catch { /* sem conexão: tenta de novo na próxima vez */ }
+  }
+
+
   // ---------------------------------------------------------------- datas
   const DAY = 86400000;
 
@@ -1457,10 +1526,10 @@
     if (del) {
       const s = state.students.find(x => x.id === del.dataset.delete);
       if (!s) return;
-      askConfirm(`Excluir ${s.name}? Esta ação não pode ser desfeita.`, 'Excluir', true).then(yes => {
+      askConfirm(`Excluir ${s.name}? Esta ação não pode ser desfeita.`, 'Excluir', true).then(async yes => {
         if (!yes) return;
         state.students = state.students.filter(x => x.id !== s.id);
-        save();
+        if (!await persist({ remove: s.id })) return;
         if ($('#f-id').value === s.id) resetForm();
         render();
         toast('Aluno excluído.');
@@ -1472,7 +1541,7 @@
     if (go) showView(go.dataset.goto);
   });
 
-  $('#student-form').addEventListener('submit', e => {
+  $('#student-form').addEventListener('submit', async e => {
     e.preventDefault();
     const id = $('#f-id').value;
     const data = {
@@ -1503,12 +1572,18 @@
       return;
     }
     const before = state.students;
+    const record = id ? { ...state.students.find(x => x.id === id), ...data } : { id: uid(), ...data };
     state.students = id
-      ? state.students.map(x => (x.id === id ? { ...x, ...data } : x))
-      : [...state.students, { id: uid(), ...data }];
-    if (!save()) {
-      state.students = before; // não perde o formulário se o navegador recusar salvar
-      return;
+      ? state.students.map(x => (x.id === id ? record : x))
+      : [...state.students, record];
+    const button = $('#f-submit');
+    button.disabled = true;
+    const ok = await persist({ student: record });
+    button.disabled = false;
+    if (!ok) {
+      if (!SERVER) state.students = before; // modo local: desfaz; no servidor, os dados já foram recarregados
+      render();
+      return; // o formulário continua preenchido para tentar de novo
     }
     toast(id ? 'Alterações salvas.' : 'Aluno adicionado.');
     resetForm();
@@ -1550,7 +1625,7 @@
   $('#rules-toggle').addEventListener('click', () => setRulesOpen($('#rules-card').hidden));
   $('#rules-close').addEventListener('click', () => { setRulesOpen(false); $('#rules-toggle').focus(); });
 
-  $('#rules-form').addEventListener('submit', e => {
+  $('#rules-form').addEventListener('submit', async e => {
     e.preventDefault();
     const num = (sel, min) => Math.max(min, parseInt($(sel).value, 10) || 0);
     const r = {
@@ -1573,14 +1648,14 @@
       return;
     }
     state.rules = { ...r, boardRuleV3: true };
-    save();
+    if (!await persist({ rules: state.rules })) return;
     render();
     toast('Regras salvas.');
   });
 
-  $('#r-reset').addEventListener('click', () => {
+  $('#r-reset').addEventListener('click', async () => {
     state.rules = { ...DEFAULT_RULES };
-    save();
+    if (!await persist({ rules: state.rules })) return;
     fillRulesForm();
     render();
     toast('Regras restauradas para o padrão.');
@@ -1649,7 +1724,7 @@
       if (!await askConfirm(`Importar ${clean.length} aluno(s)? Os dados atuais serão substituídos.`, 'Importar', true)) return;
       state.students = clean;
       if (!Array.isArray(data) && data.rules) state.rules = { ...DEFAULT_RULES, ...data.rules };
-      save();
+      if (!await persist({ all: { students: state.students, rules: state.rules } })) return;
       fillRulesForm();
       resetForm();
       render();
@@ -1662,7 +1737,7 @@
   $('#btn-sample').addEventListener('click', async () => {
     if (state.students.length && !await askConfirm('Adicionar alunos de exemplo (fictícios) à lista atual?', 'Adicionar')) return;
     state.students.push(...sampleStudents());
-    save();
+    if (!await persist({ all: { students: state.students, rules: state.rules } })) return;
     render();
     toast('Exemplos carregados.');
   });
@@ -1716,19 +1791,82 @@
     if (locked) setTimeout(() => $('#gate-pass').focus(), 0);
   }
 
-  // Decifra os dados iniciais, carrega o estado e mostra o site.
-  async function unlock(key) {
-    window.LBS_DADOS_INICIAIS = await decryptSeed(key);
-    state = load();
+  function showApp() {
     fillRulesForm();
     resetForm();
     render();
     setLocked(false);
     renderTimeline(); // mede a largura de novo, agora visível
+    updateMigrateButton();
+    $('#storage-hint').textContent = SERVER
+      ? 'Os dados ficam salvos no servidor e todos veem as mesmas informações. Use “Exportar JSON” para ter uma cópia.'
+      : 'Modo local: os dados ficam salvos só neste navegador. Use “Exportar JSON” para fazer backup.';
+  }
+
+  // Modo local: decifra os dados iniciais e carrega o estado do navegador.
+  async function unlock(key) {
+    window.LBS_DADOS_INICIAIS = await decryptSeed(key);
+    state = load();
+    showApp();
+  }
+
+  // Modo servidor: guarda o token da sessão e carrega os dados do servidor.
+  function savedSession() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY) || 'null');
+      if (s && s.token && (!s.until || s.until > Date.now())) return s.token;
+    } catch { /* ignora */ }
+    return null;
+  }
+
+  function clearSession() {
+    TOKEN = null;
+    try {
+      localStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(SESSION_KEY);
+    } catch { /* ignora */ }
+  }
+
+  function sessionExpired() {
+    if (!TOKEN) return;
+    clearSession();
+    closeDetails();
+    setLocked(true);
+    toast('Sua sessão expirou. Digite a senha de novo.');
+  }
+
+  async function loginServer(password, remember) {
+    const { token, expires } = await api('POST', 'api/login', { password, remember });
+    TOKEN = token;
+    try {
+      const entry = JSON.stringify({ token, until: expires });
+      (remember ? localStorage : sessionStorage).setItem(SESSION_KEY, entry);
+    } catch { /* sem armazenamento: vale só nesta página */ }
+    applyServerData(await api('GET', 'api/dados'));
+    showApp();
   }
 
   $('#gate-form').addEventListener('submit', async e => {
     e.preventDefault();
+    if (SERVER) {
+      const button = $('#gate-form button[type="submit"]');
+      button.disabled = true;
+      button.textContent = 'Verificando…';
+      try {
+        await loginServer($('#gate-pass').value, $('#gate-remember').checked);
+        $('#gate-error').hidden = true;
+        $('#gate-pass').value = '';
+      } catch (err) {
+        $('#gate-error').textContent = err.status === 401 ? 'Senha incorreta. Tente novamente.'
+          : err.status === 429 ? err.message : 'Não foi possível falar com o servidor. Tente de novo.';
+        $('#gate-error').hidden = false;
+        $('#gate-pass').select();
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Entrar';
+      }
+      return;
+    }
     if (!window.crypto?.subtle) {
       $('#gate-error').textContent = 'Este navegador não permite abrir os dados aqui. Acesse pelo endereço https.';
       $('#gate-error').hidden = false;
@@ -1763,14 +1901,30 @@
 
   $('#logout-btn').addEventListener('click', () => {
     clearAccess();
+    clearSession();
     closeDetails();
     setNotifOpen(false);
     setExportMenuOpen(false);
     setLocked(true);
   });
 
-  // Ao abrir: se este navegador já está conectado, decifra direto; senão, pede a senha.
+  // Ao abrir: descobre se há servidor de dados. Se este navegador já está conectado, entra direto.
   async function startup() {
+    SERVER = await detectServer();
+    if (SERVER) {
+      TOKEN = savedSession();
+      if (TOKEN) {
+        try {
+          applyServerData(await api('GET', 'api/dados'));
+          showApp();
+          return;
+        } catch {
+          clearSession();
+        }
+      }
+      setLocked(true);
+      return;
+    }
     const raw = savedAccess();
     if (raw && window.crypto?.subtle) {
       try {
@@ -1784,6 +1938,79 @@
     setLocked(true);
   }
 
+
+  // ---------------------------------------------------------------- enviar dados antigos deste navegador
+  // Antes do servidor, cada navegador guardava sua própria cópia. Este botão envia ao servidor só o
+  // que foi alterado aqui em relação aos dados iniciais (campo a campo), sem apagar nada.
+  function localData() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; }
+  }
+
+  function updateMigrateButton() {
+    let done = false;
+    try { done = localStorage.getItem(MIGRATED_KEY) === '1'; } catch { /* ignora */ }
+    const local = localData();
+    $('#btn-migrate').hidden = !(SERVER && !done && local && Array.isArray(local.students) && local.students.length);
+  }
+
+  // Campos que não contam como alteração do aluno: valores provisórios dos dados iniciais antigos
+  // (entrada "23/11/2026" e o aviso de data não encontrada), já corrigidos na base do servidor.
+  function isPlaceholder(field, value) {
+    if (field === 'entry') return value === '2026-11-23';
+    if (field === 'notes') return typeof value === 'string' && value.includes('Data de entrada não encontrada');
+    return false;
+  }
+
+  async function migrateLocalData() {
+    const local = localData();
+    if (!local) return;
+    const { students: seed } = await api('GET', 'api/semente');
+    const seedById = Object.fromEntries(seed.map(s => [s.id, s]));
+    const changes = [];
+    for (const ls of local.students) {
+      const current = state.students.find(s => s.id === ls.id);
+      const base = seedById[ls.id];
+      if (!base) {
+        if (!current) changes.push({ name: ls.name, record: ls, fields: ['novo aluno'] });
+        continue;
+      }
+      if (!current) continue; // removido no servidor: não recria
+      const fields = Object.keys(ls).filter(k => k !== 'id'
+        && JSON.stringify(ls[k]) !== JSON.stringify(base[k])
+        && JSON.stringify(ls[k]) !== JSON.stringify(current[k])
+        && !isPlaceholder(k, ls[k]));
+      if (fields.length) {
+        const record = { ...current };
+        fields.forEach(k => { record[k] = ls[k]; });
+        changes.push({ name: ls.name, record, fields });
+      }
+    }
+    if (!changes.length) {
+      try { localStorage.setItem(MIGRATED_KEY, '1'); } catch { /* ignora */ }
+      updateMigrateButton();
+      toast('Nada a enviar: os dados deste navegador já estão no servidor.');
+      return;
+    }
+    const list = changes.map(c => `${c.name} (${c.fields.length} ${c.fields.length === 1 ? 'campo' : 'campos'})`).join('; ');
+    if (!await askConfirm(`Enviar ao servidor as alterações feitas neste navegador? ${list}.`, 'Enviar')) return;
+    for (const c of changes) {
+      if (!await persist({ student: c.record })) return;
+    }
+    try { localStorage.setItem(MIGRATED_KEY, '1'); } catch { /* ignora */ }
+    await refreshFromServer(true);
+    updateMigrateButton();
+    toast(`${changes.length} ${changes.length === 1 ? 'aluno atualizado' : 'alunos atualizados'} no servidor.`);
+  }
+
+  $('#btn-migrate').addEventListener('click', () => {
+    migrateLocalData().catch(err => toast(`Não foi possível enviar: ${err.message}`));
+  });
+
+  // Alterações de outras pessoas: confere a cada minuto e ao voltar para a aba.
+  setInterval(() => refreshFromServer(), 60_000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshFromServer();
+  });
 
   // ---------------------------------------------------------------- início
   fillRulesForm();

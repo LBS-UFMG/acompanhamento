@@ -300,6 +300,7 @@
             <button class="btn" id="btn-export">Exportar JSON</button>
             <label class="btn">Importar JSON<input type="file" id="btn-import" accept="application/json" hidden></label>
             <button class="btn" id="btn-sample">Carregar exemplos</button>
+            <button class="btn primary" id="btn-migrate" hidden>Enviar dados deste navegador</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -312,7 +313,7 @@
             <tbody id="students-table"></tbody>
           </table>
         </div>
-        <p class="hint">Os dados ficam salvos no navegador (localStorage). Use “Exportar JSON” para fazer backup ou compartilhar.</p>
+        <p class="hint" id="storage-hint">Os dados ficam salvos no servidor e todos veem as mesmas informações. Use “Exportar JSON” para ter uma cópia.</p>
       </section>
     </section>
   </main>
@@ -345,7 +346,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="dados-lbs.enc.js?v=1"></script>
-  <script src="app.js?v=78"></script>
+  <script src="dados-lbs.enc.js?v=2"></script>
+  <script src="app.js?v=80"></script>
 </body>
 </html>
